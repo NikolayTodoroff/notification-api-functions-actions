@@ -1,0 +1,24 @@
+framework:
+  - terraform
+
+skip-check:
+  - CKV_AZURE_221  # Public access accepted — private endpoints require Premium plan
+  - CKV_AZURE_225  # Zone redundancy requires Premium SKU, S1 chosen for current deployment
+  - CKV_AZURE_212  # Single instance sufficient for current deployment — failover scaling not required
+  - CKV_AZURE_33  # Queue service not used — storage account holds Terraform state only
+  - CKV_AZURE_59  # Public access required — GitHub-hosted runners access state over public internet
+  - CKV_AZURE_190  # Terraform state blob storage accessed by GitHub-hosted runners over public internet
+  - CKV_AZURE_206  # LRS sufficient — Terraform state can be recreated if needed
+  - CKV_AZURE_186  # Encryption with CMK requires Premium tier, not justified for demo
+  - CKV_AZURE_187  # Purge protection not needed for demo app configuration
+  - CKV_AZURE_188  # Standard SKU not required — Free tier sufficient for demo
+  - CKV2_AZURE_1   # CMK encryption not required — Microsoft-managed keys sufficient for demo state storage
+  - CKV2_AZURE_47  # Blob anonymous access controlled at container level, state container is private
+  - CKV2_AZURE_41  # SAS expiration policy not needed — access is via RBAC, no SAS tokens used
+  - CKV2_AZURE_40  # Shared Key auth still needed for Terraform backend initialization
+  - CKV2_AZURE_33  # Private endpoint requires VNet — GitHub-hosted runners access state over public internet
+  - CKV2_AZURE_38  # Soft-delete not needed for demo state storage — can be recreated via bootstrap
+  - CKV2_AZURE_32  # Private endpoint requires VNet integration, not justified for demo
+  - CKV_AZURE_189  # Public access needed — workflows access Key Vault from GitHub-hosted runners
+  - CKV_AZURE_109  # Firewall rules would block GitHub-hosted runners with dynamic IPs
+
