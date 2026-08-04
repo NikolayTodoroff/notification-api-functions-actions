@@ -91,7 +91,7 @@ jobs:
 
       - name: Upload Plan
         if: inputs.terraform_action == 'plan' || inputs.terraform_action == 'apply'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: tfplan-${{ inputs.environment }}
           path: infra/main/tfplan
