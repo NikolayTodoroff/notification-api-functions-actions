@@ -1,0 +1,236 @@
+name: Application
+
+concurrency:
+  group: notification-api-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - 'src/**'
+  #     - 'tests/**'
+  #     - '.github/workflows/application.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build, Test, and Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: csharp
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test --no-build --configuration Release
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+
+  deploy-dev:
+    name: Deploy — dev
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+      packages: read
+
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      FUNCTION_APP_NAME: func-notif-api-dev
+      RESOURCE_GROUP: rg-main-notif-api-dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Publish
+        run: |
+          dotnet publish src/NotificationApi/NotificationApi.csproj \
+            --configuration Release \
+            --output ./publish
+
+      - name: Zip artifact
+        run: |
+          cd publish
+          zip -r ../function.zip .
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Function App
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ env.FUNCTION_APP_NAME }}
+          package: function.zip
+
+      - name: Create function key
+        run: |
+          az functionapp function keys set \
+            --name "$FUNCTION_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --function-name "PostNotification" \
+            --key-name "smoke-test"
+
+      - name: Wait for key creation
+        run: sleep 10
+
+      - name: Get host key
+        id: function_key
+        run: |
+          for i in {1..10}; do
+            key=$(az functionapp keys list \
+              --name "$FUNCTION_APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "functionKeys.default" -o tsv)
+            if [ -n "$key" ]; then
+              echo "::add-mask::$key"
+              echo "key=$key" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Key not ready yet... retrying in 5s"
+            sleep 5
+          done
+          echo "Failed to retrieve host key after multiple attempts"
+          exit 1
+
+      - name: Wait for deployment to warm up
+        run: sleep 30
+
+      - name: Smoke test
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "https://${FUNCTION_APP_NAME}.azurewebsites.net/api/notifications?code=${{ steps.function_key.outputs.key }}" \
+            -H "Content-Type: application/json" \
+            -d '{"recipient":"test@example.com","channel":"email","message":"Smoke test"}')
+
+          if [ "$response" -ne 200 ]; then
+            echo "Smoke test failed with status $response"
+            exit 1
+          fi
+          echo "Smoke test passed (200)"
+
+  deploy-prod:
+    name: Deploy — prod
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      id-token: write
+      contents: read
+      packages: read
+
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      FUNCTION_APP_NAME: func-notif-api-prod
+      RESOURCE_GROUP: rg-main-notif-api-prod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Publish
+        run: |
+          dotnet publish src/NotificationApi/NotificationApi.csproj \
+            --configuration Release \
+            --output ./publish
+
+      - name: Zip artifact
+        run: |
+          cd publish
+          zip -r ../function.zip .
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Function App
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ env.FUNCTION_APP_NAME }}
+          package: function.zip
+
+      - name: Get host key
+        id: function_key
+        run: |
+          for i in {1..10}; do
+            key=$(az functionapp keys list \
+              --name "$FUNCTION_APP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --query "functionKeys.default" -o tsv)
+            if [ -n "$key" ]; then
+              echo "::add-mask::$key"
+              echo "key=$key" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Key not ready yet... retrying in 5s"
+            sleep 5
+          done
+          echo "Failed to retrieve host key after multiple attempts"
+          exit 1
+
+      - name: Wait for deployment to warm up
+        run: sleep 30
+
+      - name: Smoke test
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "https://${FUNCTION_APP_NAME}.azurewebsites.net/api/notifications?code=${{ steps.function_key.outputs.key }}" \
+            -H "Content-Type: application/json" \
+            -d '{"recipient":"test@example.com","channel":"email","message":"Smoke test"}')
+
+          if [ "$response" -ne 200 ]; then
+            echo "Smoke test failed with status $response"
+            exit 1
+          fi
+          echo "Smoke test passed (200)"        
