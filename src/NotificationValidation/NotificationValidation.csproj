@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+<PropertyGroup>
+    <PackageId>NotificationValidation</PackageId>
+    <Authors>Nikolay Todoroff</Authors>
+    <Description>Shared validation logic for notification payloads.</Description>
+    <RepositoryUrl>https://github.com/NikolayTodoroff/notification-api-functions-actions-infra</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+</Project>
